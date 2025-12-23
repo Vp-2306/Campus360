@@ -1,14 +1,19 @@
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 export default function Navbar() {
-  const { user, loading, signIn, logout } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const navigate = useNavigate();
 
   return (
-    <nav className="sticky top-0 z-[9999] bg-white/70 backdrop-blur border-b pointer-events-auto">
+    <nav className="sticky top-0 z-50 bg-white/70 backdrop-blur border-b">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
 
         {/* Logo */}
-        <div className="flex items-center gap-2 font-semibold text-lg">
+        <div
+          onClick={() => navigate("/")}
+          className="flex items-center gap-2 font-semibold text-lg cursor-pointer"
+        >
           <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center">
             CC
           </div>
@@ -17,36 +22,42 @@ export default function Navbar() {
 
         {/* Nav links */}
         <div className="hidden md:flex gap-8 text-sm font-medium text-slate-700">
-          <a className="text-blue-600 cursor-pointer">Home</a>
-          <a className="hover:text-blue-600 cursor-pointer">Guidance</a>
-          <a className="hover:text-blue-600 cursor-pointer">
+          <Link to="/" className="hover:text-blue-600">
+            Home
+          </Link>
+          <Link to="/career/guidance" className="hover:text-blue-600">
+            Guidance
+          </Link>
+          <Link to="/career/projects" className="hover:text-blue-600">
             Projects & Events
-          </a>
-          <a className="hover:text-blue-600 cursor-pointer">Profile</a>
+          </Link>
+          <Link to="/career/buzz" className="hover:text-blue-600">
+            Campus Buzz
+          </Link>
         </div>
 
         {/* Actions */}
         <div className="flex items-center gap-4">
           {loading ? null : !user ? (
             <>
-              <button
-                onClick={signIn}
+              <Link
+                to="/auth/login"
                 className="text-sm text-slate-600 hover:text-slate-900"
               >
                 Log In
-              </button>
+              </Link>
 
-              <button
-                onClick={signIn}
+              <Link
+                to="/auth/signup"
                 className="bg-slate-900 text-white px-5 py-2 rounded-full text-sm hover:bg-slate-800 transition"
               >
                 Sign Up
-              </button>
+              </Link>
             </>
           ) : (
             <div className="flex items-center gap-3">
               <span className="text-sm text-slate-600">
-                {user.name}
+                {user.name ?? "User"}
               </span>
 
               <button
