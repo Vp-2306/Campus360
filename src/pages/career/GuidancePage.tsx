@@ -12,6 +12,7 @@ import {
   deleteDoc,
   getDocs,
   getDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../../firebase/firebase";
 import { useAuth } from "../../hooks/useAuth";
@@ -62,6 +63,13 @@ export default function GuidancePage() {
   const [acceptedResponsibility, setAcceptedResponsibility] = useState(false);
   const [alreadyApplied, setAlreadyApplied] = useState(false);
 
+  const [guides, setGuides] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [selectedTag, setSelectedTag] = useState("ALL");
+  const [requests, setRequests] = useState<any[]>([]);
+  const [pendingMap, setPendingMap] = useState<Record<string, boolean>>({});
+
+
   /* -------------------------- REAL-TIME QUESTIONS ------------------------- */
 
   useEffect(() => {
@@ -98,6 +106,65 @@ export default function GuidancePage() {
       if (snap.exists()) setAlreadyApplied(true);
     });
   }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "users"));
+
+    return onSnapshot(q, (snap) => {
+      const list: any[] = [];
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.role === "guide") {
+          list.push({ id: d.id, ...data });
+        }
+      });
+      setGuides(list);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!user || user.role !== "guide") return;
+
+    const q = query(collection(db, "guideRequests"), where("to", "==", user.uid));
+    return onSnapshot(q, snap => {
+      const arr:any[] = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      setRequests(arr);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || user.role !== "student") return;
+
+    const q = query(collection(db, "users"), where("role", "==", "guide"));
+    return onSnapshot(q, snap => {
+      const arr: any[] = [];
+      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      setGuides(arr);
+    });
+  }, [user]);
+
+
+  useEffect(() => {
+    if (!user || user.role !== "student") return;
+
+    const q = query(
+      collection(db, "connections"),
+      where("from", "==", user.uid),
+      where("status", "==", "pending")
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const map: Record<string, boolean> = {};
+      snap.docs.forEach((d) => {
+        map[d.data().to] = true;
+      });
+      setPendingMap(map);
+    });
+
+    return () => unsub();
+  }, [user]);
+
 
   /* ----------------------------- ANSWERS --------------------------------- */
 
@@ -228,6 +295,19 @@ export default function GuidancePage() {
     }
   };
 
+  const sendRequest = async (guideId: string) => {
+    if (!user || pendingMap[guideId]) return;
+
+    await addDoc(collection(db, "connections"), {
+      from: user.uid,
+      fromName: user.name,
+      to: guideId,
+      status: "pending",
+      createdAt: serverTimestamp(),
+    });
+
+    setPendingMap(prev => ({ ...prev, [guideId]: true }));
+  };
 
   /* -------------------------------- UI ----------------------------------- */
 
@@ -374,37 +454,122 @@ export default function GuidancePage() {
           </div>
 
           {/* RIGHT */}
-          <div className="space-y-8">
+          <div className="space-y-6">
+
+            {/* BECOME GUIDE CARD */}
             {user?.role === "student" && !alreadyApplied && (
-              <div className="rounded-2xl p-5 bg-gradient-to-br from-blue-50 to-purple-50">
-                <p className="text-xs text-slate-500 mb-2 uppercase">
-                  Want to help?
-                </p>
+              <div className="rounded-3xl p-6 bg-gradient-to-br from-indigo-50 to-purple-100 shadow-md border border-indigo-100">
+                <p className="text-xs text-indigo-400 uppercase tracking-wide mb-1">Want to help?</p>
+                <h3 className="text-lg font-bold mb-3 text-indigo-800">Become a Campus Guide</h3>
+
                 <button
                   onClick={() => setShowGuideModal(true)}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold"
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 
+                            text-white font-semibold shadow hover:scale-[1.02] transition"
                 >
-                  Become a Guide
+                  Apply Now
                 </button>
               </div>
             )}
 
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <h3 className="font-semibold mb-2">Connect with Guides</h3>
-              <p className="text-sm text-slate-500">
-                Mentor profiles coming soon
-              </p>
-            </div>
+            {/* STUDENT – CONNECT WITH GUIDES */}
+            {user?.role === "student" && (
+              <div className="bg-white p-6 rounded-3xl shadow-md border border-slate-100">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold">Connect with Guides</h3>
+                  <span className="text-xs text-slate-400">{guides.length} mentors</span>
+                </div>
 
-            <div className="rounded-2xl p-6 bg-gradient-to-br from-orange-500 to-pink-500 text-white shadow-lg">
-              <h3 className="font-semibold mb-2">
-                Top Guides Leaderboard
-              </h3>
-              <p className="text-sm opacity-90">
-                Based on answers & likes
-              </p>
-            </div>
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search by name or skill..."
+                  className="w-full mb-3 px-4 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-indigo-200 outline-none"
+                />
+
+                <select
+                  value={selectedTag}
+                  onChange={e => setSelectedTag(e.target.value)}
+                  className="w-full mb-4 px-4 py-2 border rounded-xl text-sm"
+                >
+                  <option>ALL</option>
+                  <option>AI</option>
+                  <option>WEB</option>
+                  <option>CAREER</option>
+                </select>
+
+                <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                  {guides
+                    .filter(g =>
+                      g.name?.toLowerCase().includes(search.toLowerCase()) &&
+                      (selectedTag === "ALL" || g.interests?.includes(selectedTag))
+                    )
+                    .map(g => (
+                      <motion.div
+                        key={g.id}
+                        whileHover={{ scale: 1.01 }}
+                        className="flex justify-between items-center bg-gradient-to-br from-slate-50 to-white 
+                                  p-4 rounded-2xl shadow-sm border border-slate-100"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-800">{g.name}</p>
+
+                          <div className="flex flex-wrap gap-1 mt-1 text-xs">
+                            {g.interests?.slice(0, 3).map((t: string) => (
+                              <span key={t} className="px-2 py-0.5 bg-indigo-100 text-indigo-600 rounded-full">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+
+                          <p className="text-xs text-amber-500 mt-1">🏆 {g.trophies || 0} trophies</p>
+                        </div>
+
+                        <button
+                          disabled={pendingMap[g.id]}
+                          onClick={() => sendRequest(g.id)}
+                          className={`px-4 py-1.5 rounded-full text-xs font-semibold transition
+                            ${pendingMap[g.id]
+                              ? "bg-slate-300 text-slate-600 cursor-not-allowed"
+                              : "bg-green-600 hover:bg-green-700 text-white"
+                            }`}
+                        >
+                          {pendingMap[g.id] ? "Pending" : "Connect"}
+                        </button>
+                      </motion.div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* GUIDE – INCOMING REQUESTS */}
+            {user?.role === "guide" && (
+              <div className="bg-white p-6 rounded-3xl shadow-md border border-slate-100">
+                <h3 className="text-lg font-bold mb-4">Connection Requests</h3>
+
+                {requests.length === 0 && (
+                  <p className="text-sm text-slate-400 italic">No new requests yet.</p>
+                )}
+
+                {requests.map(r => (
+                  <motion.div
+                    key={r.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl mb-2 border"
+                  >
+                    <p className="text-sm font-medium text-slate-700">{r.fromName}</p>
+                    <span className="text-xs px-3 py-1 rounded-full bg-orange-100 text-orange-600 font-semibold">
+                      Pending
+                    </span>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+
           </div>
+
+
         </div>
       </div>
 
