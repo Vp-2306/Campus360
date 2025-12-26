@@ -9,10 +9,9 @@ import {
   onSnapshot,
   doc,
   setDoc,
-  deleteDoc,
-  getDocs,
   getDoc,
   where,
+  limit,
 } from "firebase/firestore";
 import { db } from "../../firebase/firebase";
 import { useAuth } from "../../hooks/useAuth";
@@ -37,6 +36,14 @@ type Answer = {
   helpfulCount: number;
 };
 
+type GuideUser = {
+  totalAnswers?: number;
+  totalHelpfulLikes?: number;
+  helpfulSessions?: number;
+  reputation?: number;
+  trophies?: number;
+};
+
 /* ----------------------------- COMPONENT -------------------------------- */
 
 export default function GuidancePage() {
@@ -56,7 +63,6 @@ export default function GuidancePage() {
   const [tag, setTag] = useState("AI / ML");
   const [submitting, setSubmitting] = useState(false);
   const [answerUnsub, setAnswerUnsub] = useState<null | (() => void)>(null);
-  const [liking, setLiking] = useState<Record<string, boolean>>({});
 
   /* Become Guide */
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -68,6 +74,8 @@ export default function GuidancePage() {
   const [selectedTag, setSelectedTag] = useState("ALL");
   const [requests, setRequests] = useState<any[]>([]);
   const [pendingMap, setPendingMap] = useState<Record<string, boolean>>({});
+
+  const [leaderboard,setLeaderboard] = useState<any[]>([]);
 
 
   /* -------------------------- REAL-TIME QUESTIONS ------------------------- */
@@ -165,36 +173,46 @@ export default function GuidancePage() {
     return () => unsub();
   }, [user]);
 
+  useEffect(() => {
+    const q = query(
+      collection(db,"users"),
+      where("role","==","guide"),
+      orderBy("reputation","desc"),
+      limit(5)
+    );
+
+    return onSnapshot(q,(snap)=>{
+      setLeaderboard(
+        snap.docs.map(d => ({ id:d.id, ...d.data() }))
+      );
+    });
+  },[]);
+
+
 
   /* ----------------------------- ANSWERS --------------------------------- */
 
   const loadAnswers = (questionId: string) => {
-  if (answerUnsub) answerUnsub();
+    if (answerUnsub) answerUnsub();
 
-  const unsub = onSnapshot(
-    query(collection(db, "questions", questionId, "answers"), orderBy("createdAt", "desc")),
-    { includeMetadataChanges: true },
-    async (snapshot) => {
-
-      const answers: Answer[] = [];
-
-      for (const d of snapshot.docs) {
-        answers.push({
+    const unsub = onSnapshot(
+      query(collection(db,"questions",questionId,"answers"), orderBy("createdAt","desc")),
+      snapshot => {
+        const answers: Answer[] = snapshot.docs.map(d => ({
           id: d.id,
           text: d.data().text,
           authorName: d.data().authorName,
           authorId: d.data().authorId,
           helpfulCount: d.data().helpfulCount || 0,
-        });
+        }));
+
+        setAnswersMap(prev => ({ ...prev, [questionId]: answers }));
       }
+    );
 
+    setAnswerUnsub(() => unsub);
+  };
 
-      setAnswersMap((prev) => ({ ...prev, [questionId]: answers }));
-    }
-  );
-
-  setAnswerUnsub(() => unsub);
-};
 
 
   const postAnswer = async (questionId: string) => {
@@ -208,6 +226,27 @@ export default function GuidancePage() {
       createdAt: serverTimestamp(),
     });
 
+    const guideRef = doc(db, "users", user.uid);
+
+    await runTransaction(db, async (tx) => {
+      const guideSnap = await tx.get(guideRef);
+      if (!guideSnap.exists()) return;
+
+      const g = guideSnap.data() as GuideUser;
+
+      const totalAnswers = (g.totalAnswers || 0) + 1;
+      const totalHelpful = g.totalHelpfulLikes || 0;
+      const sessions = g.helpfulSessions || 0;
+
+      const reputation = totalHelpful * 2 + sessions * 5 + totalAnswers;
+      const trophies = Math.floor(reputation / 20);
+
+      tx.update(guideRef, {
+        totalAnswers: increment(1),
+        reputation,
+        trophies,
+      });
+    });
 
     setAnswerText("");
   };
@@ -232,30 +271,29 @@ export default function GuidancePage() {
     setSubmitting(false);
   };
 
-  const toggleAnswerLike = async (qid: string, aid: string) => {
+  const toggleAnswerLike = async (qid: string, aid: string, guideId: string) => {
     if (!user) return;
 
-    const likeRef = doc(db, "questions", qid, "answers", aid, "likes", user.uid);
+    const likeRef   = doc(db, "questions", qid, "answers", aid, "likes", user.uid);
     const answerRef = doc(db, "questions", qid, "answers", aid);
-
-    // 🔹 Optimistic UI update
-    setAnswersMap((prev) => ({
-      ...prev,
-      [qid]: prev[qid].map((a) =>
-        a.id === aid ? { ...a, helpfulCount: a.helpfulCount + 1 } : a
-      ),
-    }));
+    const guideRef  = doc(db, "users", guideId);
 
     try {
       await runTransaction(db, async (tx) => {
         const likeSnap = await tx.get(likeRef);
 
-        if (likeSnap.exists()) return; // user already liked
+        // only block THIS answer – not whole page
+        if (likeSnap.exists()) return;
 
-        tx.set(likeRef, { createdAt: Date.now() });
+        tx.set(likeRef, { createdAt: serverTimestamp() });
 
         tx.update(answerRef, {
           helpfulCount: increment(1),
+        });
+
+        tx.update(guideRef, {
+          totalHelpfulLikes: increment(1),
+          reputation: increment(4),
         });
       });
     } catch (err) {
@@ -279,11 +317,15 @@ export default function GuidancePage() {
       });
 
       // 2️⃣ Promote user to guide
-      await setDoc(
-        doc(db, "users", user.uid),
-        { role: "guide" },
-        { merge: true }
-      );
+      await setDoc(doc(db,"users",user.uid),{
+        role:"guide",
+        totalAnswers:0,
+        totalHelpfulLikes:0,
+        helpfulSessions:0,
+        reputation:0,
+        trophies:0
+      },{merge:true});
+
 
       setShowGuideModal(false);
       setAcceptedResponsibility(false);
@@ -403,7 +445,7 @@ export default function GuidancePage() {
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <button
-                                  onClick={() => toggleAnswerLike(q.id, ans.id)}
+                                  onClick={() => toggleAnswerLike(q.id, ans.id, ans.authorId)}
                                   className="flex items-center gap-2 px-5 py-2 rounded-full 
                                             bg-green-100 hover:bg-green-200 text-green-700 
                                             text-sm font-semibold transition shadow-sm"
@@ -566,6 +608,46 @@ export default function GuidancePage() {
                 ))}
               </div>
             )}
+
+            <div className="rounded-3xl p-6 bg-gradient-to-br from-yellow-400 via-orange-400 to-pink-500 shadow-2xl">
+              <h3 className="text-white text-lg font-extrabold mb-4 tracking-wide">
+                🏆 Top Guides Leaderboard
+              </h3>
+
+              <div className="space-y-4">
+                {leaderboard.map((g,i)=>(
+                  <motion.div
+                    key={g.id}
+                    initial={{opacity:0,y:10}}
+                    animate={{opacity:1,y:0}}
+                    className="bg-white/90 backdrop-blur-md rounded-2xl p-4 flex justify-between items-center shadow-lg"
+                  >
+                    <div>
+                      <p className="font-bold text-slate-800">
+                        #{i+1} {g.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        💬 {g.totalAnswers} Answers • 👍 {g.totalHelpfulLikes} Helpful
+                      </p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        <span className="text-sm font-bold text-yellow-700">
+                          🏆 {g.trophies || 0}
+                        </span>
+
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-xl font-extrabold text-orange-600">
+                        {g.reputation}
+                      </p>
+                      <p className="text-[10px] text-slate-400">REP</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
 
           </div>
 
