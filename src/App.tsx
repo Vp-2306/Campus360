@@ -11,6 +11,8 @@ import Login from "./pages/auth/Login";
 import Signup from "./pages/auth/Signup";
 import ProfileSetup from "./pages/auth/ProfileSetup";
 
+import ChatPage from "./pages/career/ChatPage";
+
 export default function App() {
   return (
     <div className="min-h-screen bg-slate-50">
@@ -21,7 +23,8 @@ export default function App() {
         <Route path="/" element={<CareerModule />} />
         <Route path="/auth/login" element={<Login />} />
         <Route path="/auth/signup" element={<Signup />} />
-
+        <Route path="/career/chat/:id" element={<ChatPage />} />
+        
         {/* PROFILE SETUP (logged in but incomplete) */}
         <Route
           path="/profile-setup"

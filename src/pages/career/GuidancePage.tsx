@@ -12,10 +12,12 @@ import {
   getDoc,
   where,
   limit,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "../../firebase/firebase";
 import { useAuth } from "../../hooks/useAuth";
 import { runTransaction, increment } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
 
 
 /* -------------------------------- TYPES -------------------------------- */
@@ -48,7 +50,7 @@ type GuideUser = {
 
 export default function GuidancePage() {
   const { user } = useAuth();
-
+  const navigate = useNavigate();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -63,7 +65,7 @@ export default function GuidancePage() {
   const [tag, setTag] = useState("AI / ML");
   const [submitting, setSubmitting] = useState(false);
   const [answerUnsub, setAnswerUnsub] = useState<null | (() => void)>(null);
-
+  const [connectionStatus, setConnectionStatus] = useState<Record<string,string>>({});
   /* Become Guide */
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [acceptedResponsibility, setAcceptedResponsibility] = useState(false);
@@ -76,6 +78,7 @@ export default function GuidancePage() {
   const [pendingMap, setPendingMap] = useState<Record<string, boolean>>({});
 
   const [leaderboard,setLeaderboard] = useState<any[]>([]);
+  const [myConnections, setMyConnections] = useState<any[]>([]);
 
 
   /* -------------------------- REAL-TIME QUESTIONS ------------------------- */
@@ -133,10 +136,14 @@ export default function GuidancePage() {
   useEffect(() => {
     if (!user || user.role !== "guide") return;
 
-    const q = query(collection(db, "guideRequests"), where("to", "==", user.uid));
+    const q = query(
+      collection(db,"connections"),
+      where("to","==",user.uid),
+      where("status","==","pending")
+    );
+
     return onSnapshot(q, snap => {
-      const arr:any[] = [];
-      snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+      const arr:any[] = snap.docs.map(d => ({ id:d.id, ...d.data() }));
       setRequests(arr);
     });
   }, [user]);
@@ -156,22 +163,17 @@ export default function GuidancePage() {
   useEffect(() => {
     if (!user || user.role !== "student") return;
 
-    const q = query(
-      collection(db, "connections"),
-      where("from", "==", user.uid),
-      where("status", "==", "pending")
-    );
+    const q = query(collection(db,"connections"), where("from","==",user.uid));
 
-    const unsub = onSnapshot(q, (snap) => {
-      const map: Record<string, boolean> = {};
-      snap.docs.forEach((d) => {
-        map[d.data().to] = true;
+    return onSnapshot(q, snap => {
+      const map: Record<string,string> = {};
+      snap.docs.forEach(d=>{
+        map[d.data().to] = d.data().status; // pending | accepted | rejected
       });
-      setPendingMap(map);
+      setConnectionStatus(map);
     });
-
-    return () => unsub();
   }, [user]);
+
 
   useEffect(() => {
     const q = query(
@@ -188,6 +190,17 @@ export default function GuidancePage() {
     });
   },[]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const q = user.role === "student"
+      ? query(collection(db,"connections"), where("from","==",user.uid), where("status","==","accepted"))
+      : query(collection(db,"connections"), where("to","==",user.uid), where("status","==","accepted"));
+
+    return onSnapshot(q, snap => {
+      setMyConnections(snap.docs.map(d => ({ id:d.id, ...d.data() })));
+    });
+  }, [user]);
 
 
   /* ----------------------------- ANSWERS --------------------------------- */
@@ -351,6 +364,27 @@ export default function GuidancePage() {
     setPendingMap(prev => ({ ...prev, [guideId]: true }));
   };
 
+  const acceptRequest = async (id: string, studentId: string) => {
+    await updateDoc(doc(db,"connections",id),{
+      status:"accepted",
+      acceptedAt: serverTimestamp(),
+      toName: user!.name
+    });
+
+    await setDoc(doc(db,"chats",id),{
+      participants:[user!.uid, studentId],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  };
+
+
+  const rejectRequest = async (req:any) => {
+    await updateDoc(doc(db, "connections", req.id), {
+      status: "rejected"
+    });
+  };
+
   /* -------------------------------- UI ----------------------------------- */
 
   return (
@@ -359,7 +393,7 @@ export default function GuidancePage() {
         <h1 className="text-4xl font-extrabold mb-8">Public Guidance Wall</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-          {/* LEFT */}
+          {/* LEFT   */}
           <div className="lg:col-span-2">
             <button
               onClick={() => setShowModal(true)}
@@ -568,16 +602,23 @@ export default function GuidancePage() {
                         </div>
 
                         <button
-                          disabled={pendingMap[g.id]}
+                          disabled={connectionStatus[g.id] === "pending" || connectionStatus[g.id] === "accepted"}
                           onClick={() => sendRequest(g.id)}
                           className={`px-4 py-1.5 rounded-full text-xs font-semibold transition
-                            ${pendingMap[g.id]
+                            ${connectionStatus[g.id] === "accepted"
+                              ? "bg-blue-500 text-white cursor-default"
+                              : connectionStatus[g.id] === "pending"
                               ? "bg-slate-300 text-slate-600 cursor-not-allowed"
                               : "bg-green-600 hover:bg-green-700 text-white"
                             }`}
                         >
-                          {pendingMap[g.id] ? "Pending" : "Connect"}
+                          {connectionStatus[g.id] === "accepted"
+                            ? "Connected"
+                            : connectionStatus[g.id] === "pending"
+                            ? "Pending"
+                            : "Connect"}
                         </button>
+
                       </motion.div>
                     ))}
                 </div>
@@ -600,14 +641,50 @@ export default function GuidancePage() {
                     animate={{ opacity: 1, y: 0 }}
                     className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl mb-2 border"
                   >
-                    <p className="text-sm font-medium text-slate-700">{r.fromName}</p>
-                    <span className="text-xs px-3 py-1 rounded-full bg-orange-100 text-orange-600 font-semibold">
-                      Pending
-                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">{r.fromName}</p>
+                      <p className="text-xs text-slate-400">wants to connect</p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => acceptRequest(r.id, r.from)}
+                        className="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded-full"
+                      >
+                        Accept
+                      </button>
+
+                      <button
+                        onClick={() => rejectRequest(r)}
+                        className="bg-red-500 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded-full"
+                      >
+                        Reject
+                      </button>
+                    </div>
                   </motion.div>
                 ))}
               </div>
             )}
+
+
+            <div className="bg-white p-6 rounded-3xl shadow-md border">
+              <h3 className="text-lg font-bold mb-3">My Connections</h3>
+
+              {myConnections.map(c=>(
+                <div key={c.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl mb-2">
+                  <p className="text-sm font-medium">
+                    {user?.role==="student" ? c.toName : c.fromName}
+                  </p>
+                  <button
+                    onClick={() => navigate(`/career/chat/${c.id}`)}
+                    className="text-indigo-600 font-semibold text-sm"
+                  >
+                    💬 Chat
+                  </button>   
+                </div>
+              ))}
+            </div>
+
 
             <div className="rounded-3xl p-6 bg-gradient-to-br from-yellow-400 via-orange-400 to-pink-500 shadow-2xl">
               <h3 className="text-white text-lg font-extrabold mb-4 tracking-wide">
