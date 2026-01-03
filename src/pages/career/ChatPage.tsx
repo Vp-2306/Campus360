@@ -8,7 +8,6 @@ import {
   serverTimestamp,
   doc,
   getDoc,
-  updateDoc,
 } from "firebase/firestore";
 import { db } from "../../firebase/firebase";
 import { useAuth } from "../../hooks/useAuth";

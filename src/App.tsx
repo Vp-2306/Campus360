@@ -12,6 +12,7 @@ import Signup from "./pages/auth/Signup";
 import ProfileSetup from "./pages/auth/ProfileSetup";
 
 import ChatPage from "./pages/career/ChatPage";
+import ProjectWorkspace from "./pages/career/ProjectWorkspace";
 
 export default function App() {
   return (
@@ -24,7 +25,7 @@ export default function App() {
         <Route path="/auth/login" element={<Login />} />
         <Route path="/auth/signup" element={<Signup />} />
         <Route path="/career/chat/:id" element={<ChatPage />} />
-        
+        <Route path="/projects/workspace/:projectId" element={<ProjectWorkspace />} />
         {/* PROFILE SETUP (logged in but incomplete) */}
         <Route
           path="/profile-setup"

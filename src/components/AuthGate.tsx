@@ -25,14 +25,9 @@ export default function AuthGate({ children }: Props) {
 
   // Logged in but profile incomplete → go to profile setup
   if (!user.profileCompleted && location.pathname !== "/profile-setup") {
-    return (
-      <Navigate
-        to="/profile-setup"
-        state={{ from: location.pathname }}
-        replace
-      />
-    );
+    return <Navigate to="/profile-setup" replace />;
   }
+
 
   return <>{children}</>;
 }
