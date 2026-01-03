@@ -9,8 +9,7 @@ export default function Login() {
   const location = useLocation();
 
   // where user wanted to go before login
-  const from =
-    (location.state as any)?.from || "/career/guidance";
+  const from = (location.state as any)?.from || "/";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
