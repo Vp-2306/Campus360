@@ -142,6 +142,12 @@
     }, [mode]);
 
 
+    {events.map(e => (
+      <div key={e.id}>
+        <h3>{e.title}</h3>
+      </div>
+    ))}
+    
     const toggleItem=(i:string,list:string[],setList:any)=>{
       setList(list.includes(i)?list.filter(t=>t!==i):[...list,i]);
     };
